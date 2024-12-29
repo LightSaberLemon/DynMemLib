@@ -24,6 +24,8 @@
     Additional disclaimer: The code in (this) DynMemLib.pas file has been entirely written from scratch,
     following BTMemoryModule as a reference implementation. No code has been copied, including constants and type definitions.
     It follows much of its logic, structure and approaches.
+    There are many authors/contributors of the original code/implementations and their forks,
+    so feel free to google MemoryModule or look on GitHub.
 }
 
 
@@ -104,6 +106,16 @@ type
     Name: DWord;
     FirstThunk: DWord;
   end;
+
+  IMAGE_RUNTIME_FUNCTION_ENTRY = record
+    BeginAddress: DWord;
+    EndAddress: DWord;
+    ExceptionHandler: Pointer;  //DWord ?
+    HandlerData: Pointer;       //DWord ?
+    PrologEndAddress: DWord;
+  end;
+
+  PIMAGE_RUNTIME_FUNCTION_ENTRY = ^IMAGE_RUNTIME_FUNCTION_ENTRY;
 
   IMAGE_IMPORT_BY_NAME = record
     Hint: Word;
@@ -402,13 +414,17 @@ begin
 
         if DataSize > 0 then
           if not VirtualProtect(Pointer(WorkSection^.Misc.PhysicalAddress), WorkSection^.SizeOfRawData, ProtectionInfo, OldProtectionInfo) then //OldProtectionInfo has to be a valid var
-            Exit;//raise Exception.Create('VirtualProtect cannot set protection info at section ' + IntToStr(i) + ' of ' + IntToStr(n) + '.');
+          begin
+            //Exit;//raise Exception.Create('VirtualProtect cannot set protection info at section ' + IntToStr(i) + ' of ' + IntToStr(n) + '.');
+          end;
       end;
     end;
 
     WorkSection := Pointer(UInt64(WorkSection) + UInt64(SizeOf(TIMAGESECTIONHEADER)));
   end;
 end;
+
+function RtlAddFunctionTable(FunctionTable: PIMAGE_RUNTIME_FUNCTION_ENTRY; EntryCount: DWord; BaseAddress: QWord): Bool; external 'kernel32' name 'RtlAddFunctionTable';
 
 function TDynMemLib.MemLoadLibrary(ALibData: Pointer): Boolean;
 var
@@ -417,6 +433,9 @@ var
   HeaderAddress, CodeAddress: Pointer;
   LocationAmount: UInt64;
   LibEntryProc: TLibEntryProc;
+  ImageDataDir: PImageDataDirectory;
+  ImageRuntime: PIMAGE_RUNTIME_FUNCTION_ENTRY;
+  Count: DWord;
 begin
   Result := False;
 
@@ -460,6 +479,13 @@ begin
     LocationAmount := UInt64(CodeAddress) - UInt64(OldHeader.OptionalHeader.ImageBase);
     if LocationAmount <> 0 then
       RelocateImageBase(LocationAmount);
+
+    ImageDataDir := @FLibHeaders^.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
+    ImageRuntime := Pointer(UInt64(CodeAddress) + UInt64(ImageDataDir^.VirtualAddress));
+    Count := ImageDataDir^.Size div SizeOf(IMAGE_RUNTIME_FUNCTION_ENTRY) - 1;
+
+    if not RtlAddFunctionTable(ImageRuntime, Count, UInt64(CodeAddress)) then
+      raise Exception.Create('Cannot add function to table.');
 
     try
       LoadImports;
