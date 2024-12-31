@@ -28,16 +28,17 @@
     so feel free to google MemoryModule or look on GitHub.
 }
 
-
 unit DynMemLib;
 
-{$mode Delphi}{$H+}
-{$WARN 4056 off : Conversion between ordinals and pointers is not portable}
+{$IFDEF FPC}
+  {$mode Delphi}{$H+}
+  {$WARN 4056 off : Conversion between ordinals and pointers is not portable}
+{$ENDIF}
+
 interface
 
 uses
   Windows, Classes;
-
 
 type
   TMemLibSection = record
@@ -71,11 +72,24 @@ type
     function MemGetProcAddress(AFuncName: PChar): Pointer; overload;
     function MemGetProcAddress(AFuncName: string): Pointer; overload;
     procedure MemFreeLibrary;
-
+	
     //This option has to be set/reset before calling MemLoadLibrary, to decide if the library's entry point can be called. By default, it is True.
     property AttachLibraryOnLoad: Boolean read FAttachLibraryOnLoad write FAttachLibraryOnLoad;
+    property Initialized: Boolean read FInitialized;
   end;
 
+  {$IFNDEF FPC}  //Delphi
+    {$IFDEF CPUX64}
+      PtrUInt = QWord;
+      PtrInt = Int64;
+    {$ELSE} //CPUX32
+      PtrUInt = Cardinal;
+      PtrInt = LongInt;
+    {$ENDIF}
+
+    PUInt64 = ^UInt64;
+    PPtrUInt = ^PtrUInt;
+  {$ENDIF}
 
 implementation
 
@@ -106,13 +120,14 @@ type
     Name: DWord;
     FirstThunk: DWord;
   end;
+  PIMAGE_IMPORT_DESCRIPTOR = ^IMAGE_IMPORT_DESCRIPTOR;
 
-  {$IFDEF CPU64}
+  {$IFDEF CPUX64} //Delphi
     IMAGE_RUNTIME_FUNCTION_ENTRY = record
       BeginAddress: DWord;
       EndAddress: DWord;
-      ExceptionHandler: Pointer;  //DWord ?
-      HandlerData: Pointer;       //DWord ?
+      ExceptionHandler: Pointer;
+      HandlerData: Pointer;
       PrologEndAddress: DWord;
     end;
 
@@ -123,6 +138,21 @@ type
     Hint: Word;
     Name: array[Byte] of AnsiChar;
   end;
+
+  IMAGE_EXPORT_DIRECTORY = record
+    Characteristics: DWord;
+    TimeDateStamp: DWord;
+    MajorVersion: Word;
+    MinorVersion: Word;
+    Name: DWord;
+    Base: DWord;
+    NumberOfFunctions: DWord;
+    NumberOfNames: DWord;
+    AddressOfFunctions: DWord;
+    AddressOfNames: DWord;
+    AddressOfNameOrdinals: DWord;
+  end;
+  PIMAGE_EXPORT_DIRECTORY = ^IMAGE_EXPORT_DIRECTORY;
 
   TWideCharArray = array[0..2047] of WideChar;
 
@@ -286,7 +316,11 @@ begin
       if FImportedLibsAddr = nil then
         FImportedLibsAddr := AllocMem(1);
 
-      FImportedLibsAddr := ReAllocMem(FImportedLibsAddr, PtrUInt((FImportedLibsCount + 1) * SizeOf(UInt64)));
+      {$IFDEF FPC}
+        FImportedLibsAddr := ReAllocMem(FImportedLibsAddr, PtrUInt((FImportedLibsCount + 1) * SizeOf(UInt64)));
+      {$ELSE}
+        ReAllocMem(FImportedLibsAddr, PtrUInt((FImportedLibsCount + 1) * SizeOf(UInt64)));
+      {$ENDIF}  
 
       if FImportedLibsAddr = nil then
         raise Exception.Create('ReAllocMem cannot allocate memory for the library modules. ModulesCount is ' + IntToStr(FImportedLibsCount));
@@ -426,7 +460,7 @@ begin
   end;
 end;
 
-{$IFDEF CPU64}
+{$IFDEF CPUX64}
   function RtlAddFunctionTable(FunctionTable: PIMAGE_RUNTIME_FUNCTION_ENTRY; EntryCount: DWord; BaseAddress: QWord): Bool; external 'kernel32' name 'RtlAddFunctionTable';
 {$ENDIF}
 
@@ -437,9 +471,9 @@ var
   HeaderAddress, CodeAddress: Pointer;
   LocationAmount: UInt64;
   LibEntryProc: TLibEntryProc;
-  {$IFDEF CPU64} ImageDataDir: PImageDataDirectory; {$ENDIF}
-  {$IFDEF CPU64} ImageRuntime: PIMAGE_RUNTIME_FUNCTION_ENTRY; {$ENDIF}
-  {$IFDEF CPU64} Count: DWord; {$ENDIF}
+  {$IFDEF CPUX64} ImageDataDir: PImageDataDirectory; {$ENDIF}
+  {$IFDEF CPUX64} ImageRuntime: PIMAGE_RUNTIME_FUNCTION_ENTRY; {$ENDIF}
+  {$IFDEF CPUX64} Count: DWord; {$ENDIF}
 begin
   Result := False;
 
@@ -484,7 +518,7 @@ begin
     if LocationAmount <> 0 then
       RelocateImageBase(LocationAmount);
 
-    {$IFDEF CPU64}
+    {$IFDEF CPUX64}
       ImageDataDir := @FLibHeaders^.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
       ImageRuntime := Pointer(UInt64(CodeAddress) + UInt64(ImageDataDir^.VirtualAddress));
       Count := ImageDataDir^.Size div SizeOf(IMAGE_RUNTIME_FUNCTION_ENTRY) - 1;
@@ -572,7 +606,7 @@ begin
   Result := Pointer(UInt64(FCodeAddr) + UInt64(PDWord(CodeAddrWithFuncsAddr)^));  //This is PDWord, because dereferencing an 8-byte pointer, results in an invalid offset for 64-bit OS.
 end;
 
-function TDynMemLib.MemGetProcAddress(AFuncName: string): Pointer; overload;
+function TDynMemLib.MemGetProcAddress(AFuncName: string): Pointer;
 begin
   Result := MemGetProcAddress(PChar(@AFuncName[1]));
 end;
@@ -593,7 +627,7 @@ begin
 
       try
         //This call is limited to 32-bit because it crashes on 64-bit.
-        {$IFNDEF CPU64}  //This has to be verified on Delphi 64-bit.
+        {$IFNDEF CPUX64}
           LibEntryProc(UInt64(FCodeAddr), DLL_PROCESS_DETACH, nil); //Do not verify the result, because the library sets it.
         {$ENDIF}
       except
