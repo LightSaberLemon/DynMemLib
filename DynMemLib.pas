@@ -107,15 +107,17 @@ type
     FirstThunk: DWord;
   end;
 
-  IMAGE_RUNTIME_FUNCTION_ENTRY = record
-    BeginAddress: DWord;
-    EndAddress: DWord;
-    ExceptionHandler: Pointer;  //DWord ?
-    HandlerData: Pointer;       //DWord ?
-    PrologEndAddress: DWord;
-  end;
+  {$IFDEF CPU64}
+    IMAGE_RUNTIME_FUNCTION_ENTRY = record
+      BeginAddress: DWord;
+      EndAddress: DWord;
+      ExceptionHandler: Pointer;  //DWord ?
+      HandlerData: Pointer;       //DWord ?
+      PrologEndAddress: DWord;
+    end;
 
-  PIMAGE_RUNTIME_FUNCTION_ENTRY = ^IMAGE_RUNTIME_FUNCTION_ENTRY;
+    PIMAGE_RUNTIME_FUNCTION_ENTRY = ^IMAGE_RUNTIME_FUNCTION_ENTRY;
+  {$ENDIF}
 
   IMAGE_IMPORT_BY_NAME = record
     Hint: Word;
@@ -435,9 +437,9 @@ var
   HeaderAddress, CodeAddress: Pointer;
   LocationAmount: UInt64;
   LibEntryProc: TLibEntryProc;
-  ImageDataDir: PImageDataDirectory;
-  ImageRuntime: PIMAGE_RUNTIME_FUNCTION_ENTRY;
-  Count: DWord;
+  {$IFDEF CPU64} ImageDataDir: PImageDataDirectory; {$ENDIF}
+  {$IFDEF CPU64} ImageRuntime: PIMAGE_RUNTIME_FUNCTION_ENTRY; {$ENDIF}
+  {$IFDEF CPU64} Count: DWord; {$ENDIF}
 begin
   Result := False;
 
