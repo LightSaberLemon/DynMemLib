@@ -424,7 +424,9 @@ begin
   end;
 end;
 
-function RtlAddFunctionTable(FunctionTable: PIMAGE_RUNTIME_FUNCTION_ENTRY; EntryCount: DWord; BaseAddress: QWord): Bool; external 'kernel32' name 'RtlAddFunctionTable';
+{$IFDEF CPU64}
+  function RtlAddFunctionTable(FunctionTable: PIMAGE_RUNTIME_FUNCTION_ENTRY; EntryCount: DWord; BaseAddress: QWord): Bool; external 'kernel32' name 'RtlAddFunctionTable';
+{$ENDIF}
 
 function TDynMemLib.MemLoadLibrary(ALibData: Pointer): Boolean;
 var
@@ -480,12 +482,14 @@ begin
     if LocationAmount <> 0 then
       RelocateImageBase(LocationAmount);
 
-    ImageDataDir := @FLibHeaders^.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
-    ImageRuntime := Pointer(UInt64(CodeAddress) + UInt64(ImageDataDir^.VirtualAddress));
-    Count := ImageDataDir^.Size div SizeOf(IMAGE_RUNTIME_FUNCTION_ENTRY) - 1;
+    {$IFDEF CPU64}
+      ImageDataDir := @FLibHeaders^.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
+      ImageRuntime := Pointer(UInt64(CodeAddress) + UInt64(ImageDataDir^.VirtualAddress));
+      Count := ImageDataDir^.Size div SizeOf(IMAGE_RUNTIME_FUNCTION_ENTRY) - 1;
 
-    if not RtlAddFunctionTable(ImageRuntime, Count, UInt64(CodeAddress)) then
-      raise Exception.Create('Cannot add function to table.');
+      if not RtlAddFunctionTable(ImageRuntime, Count, UInt64(CodeAddress)) then
+        raise Exception.Create('Cannot add function to table.');
+    {$ENDIF}
 
     try
       LoadImports;
